@@ -1,0 +1,10 @@
+import { View, StyleSheet } from 'react-native';
+
+export const A = () => <View style={[styles.a, styles.b]} />;
+
+const styles = StyleSheet.create({
+  a: { flex: 1 },
+  b: {
+    margin: 4,
+  },
+});
