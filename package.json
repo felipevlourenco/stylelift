@@ -51,6 +51,36 @@
           "type": "boolean",
           "default": true,
           "description": "Show a hint on inline styles that can be extracted."
+        },
+        "rnStyleExtract.stylesName": {
+          "type": "string",
+          "default": "styles",
+          "description": "Variable name for a style sheet StyleLift creates."
+        },
+        "rnStyleExtract.placement": {
+          "type": "string",
+          "enum": [
+            "bottom",
+            "top",
+            "separateFile"
+          ],
+          "default": "bottom",
+          "description": "Where a new style sheet goes: bottom or top of the file, or a separate Component.styles.ts next to it. An existing style sheet in the file is always reused.",
+          "enumDescriptions": [
+            "At the end of the file",
+            "After the imports",
+            "In Component.styles.ts, imported by the component"
+          ]
+        },
+        "rnStyleExtract.factory": {
+          "type": "string",
+          "default": "StyleSheet.create",
+          "description": "Call that wraps the styles, e.g. StyleSheet.create or a custom helper. The StyleSheet import is only added automatically for StyleSheet.create."
+        },
+        "rnStyleExtract.sortKeys": {
+          "type": "boolean",
+          "default": false,
+          "description": "Sort style keys alphabetically (the new style's properties, and its place in an already-sorted style sheet)."
         }
       }
     }

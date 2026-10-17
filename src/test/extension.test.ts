@@ -1,4 +1,7 @@
 import * as assert from 'assert';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import * as vscode from 'vscode';
 
 const SOURCE = `import { View } from 'react-native';
@@ -43,7 +46,20 @@ async function waitForAction(doc: vscode.TextDocument, offset: number) {
 	}
 }
 
-suite('StyleLift extension', () => {
+/** Run the extract command with the name prompt answered by `name`. */
+async function extractAs(name: string, uri: vscode.Uri, offset: number) {
+	const original = vscode.window.showInputBox;
+	vscode.window.showInputBox = async () => name;
+	try {
+		await vscode.commands.executeCommand('stylelift.extractStyle', uri, offset);
+	} finally {
+		vscode.window.showInputBox = original;
+	}
+}
+
+suite('StyleLift extension', function () {
+	this.timeout(10000);
+
 	test('offers the action on an inline style; one edit, one undo', async () => {
 		const { doc, editor } = await open(SOURCE);
 		const margin = SOURCE.indexOf('margin');
@@ -121,5 +137,48 @@ suite('StyleLift extension', () => {
 		const at = editor.selection.active;
 		assert.strictEqual(doc.getText(new vscode.Range(at, at.translate(0, 'container'.length))), 'container');
 		await vscode.commands.executeCommand('cancelRenameInput').then(undefined, () => undefined);
+	});
+
+	test('settings: stylesName, factory, sortKeys', async () => {
+		const cfg = vscode.workspace.getConfiguration('rnStyleExtract');
+		await cfg.update('stylesName', 's', vscode.ConfigurationTarget.Global);
+		await cfg.update('sortKeys', true, vscode.ConfigurationTarget.Global);
+		try {
+			const src = SOURCE.replace('margin: 4', 'padding: 1, margin: 4');
+			const { doc } = await open(src);
+			await extractAs('container', doc.uri, src.indexOf('margin'));
+			assert.match(doc.getText(), /<View style=\{s\.container\} \/>/);
+			assert.match(doc.getText(), /const s = StyleSheet\.create\(\{\n {2}container: \{\n {4}margin: 4,\n {4}padding: 1,/);
+		} finally {
+			await cfg.update('stylesName', undefined, vscode.ConfigurationTarget.Global);
+			await cfg.update('sortKeys', undefined, vscode.ConfigurationTarget.Global);
+		}
+	});
+
+	test('separate file: creates Component.styles.ts, imports it, one undo', async () => {
+		const dir = vscode.Uri.file(fs.mkdtempSync(path.join(os.tmpdir(), 'stylelift-')));
+		const main = vscode.Uri.joinPath(dir, 'Card.tsx');
+		await vscode.workspace.fs.writeFile(main, Buffer.from(SOURCE));
+		const cfg = vscode.workspace.getConfiguration('rnStyleExtract');
+		await cfg.update('placement', 'separateFile', vscode.ConfigurationTarget.Global);
+		try {
+			await vscode.extensions.all.find((e) => e.packageJSON.name === 'stylelift')!.activate();
+			const doc = await vscode.workspace.openTextDocument(main);
+			await vscode.window.showTextDocument(doc);
+			await extractAs('container', doc.uri, SOURCE.indexOf('margin'));
+
+			assert.match(doc.getText(), /import \{ styles \} from '\.\/Card\.styles';/);
+			assert.match(doc.getText(), /<View style=\{styles\.container\} \/>/);
+			assert.ok(!doc.getText().includes('StyleSheet.create'), 'no sheet left in the component file');
+			const sibling = await vscode.workspace.openTextDocument(vscode.Uri.joinPath(dir, 'Card.styles.ts'));
+			assert.strictEqual(sibling.getText(), "import { StyleSheet } from 'react-native';\n\nexport const styles = StyleSheet.create({\n  container: {\n    margin: 4,\n  },\n});\n");
+
+			await vscode.window.showTextDocument(doc);
+			await vscode.commands.executeCommand('undo');
+			assert.strictEqual(doc.getText(), SOURCE, 'undo restores the component file');
+			assert.strictEqual(sibling.getText(), '', 'and empties (or removes) the created file');
+		} finally {
+			await cfg.update('placement', undefined, vscode.ConfigurationTarget.Global);
+		}
 	});
 });

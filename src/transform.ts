@@ -16,7 +16,26 @@ export interface Edit {
 	start: number;
 	end: number;
 	text: string;
+	/** Set for the separate styles file (a name next to the analysed file); offsets are then into that file. */
+	file?: string;
+	/** The separate file does not exist yet: `text` is its whole content. */
+	create?: boolean;
 }
+
+export interface Options {
+	/** Variable name of a new style sheet. */
+	stylesName: string;
+	placement: 'bottom' | 'top' | 'separateFile';
+	/** Call that wraps the styles, e.g. `StyleSheet.create`. */
+	factory: string;
+	sortKeys: boolean;
+	/** Base name of the analysed file; needed for `separateFile` (`Card.tsx` -> `Card.styles.ts`). */
+	fileName?: string;
+	/** Current text of the separate styles file, if it exists. */
+	siblingText?: string;
+}
+
+export const DEFAULT_OPTIONS: Options = { stylesName: 'styles', placement: 'bottom', factory: 'StyleSheet.create', sortKeys: false };
 
 export interface Analysis {
 	/** Suggested key for the new style, unique within the style sheet. */
@@ -38,10 +57,16 @@ export interface Analysis {
 interface Sheet {
 	name: string;
 	object: ObjectExpression;
+	/** Text the sheet's offsets refer to. */
+	source: string;
+	/** Set when the sheet lives in the separate styles file. */
+	file?: string;
 }
 
-interface Pick {
+interface Item {
 	loc: Located;
+	/** undefined = no sheet exists yet; one is created. */
+	sheet?: Sheet;
 	key: string;
 	fixed: Node[];
 	dynamic: Node[];
@@ -49,8 +74,16 @@ interface Pick {
 	add: boolean;
 }
 
-const SHEET = 'styles';
-const FACTORY = 'StyleSheet.create';
+interface Ctx {
+	source: string;
+	ast: File;
+	opts: Options;
+	/** The separate styles file, when placement asks for one. */
+	sib?: { file: string; module: string; ast?: File };
+	/** In-file sheets first, then the separate file's exported ones. */
+	sheets: Sheet[];
+}
+
 const DEFAULT_KEYS: Record<string, string> = { View: 'container', Text: 'text', Image: 'image' };
 
 export function parseSource(source: string): ParseResult<File> | undefined {
@@ -242,26 +275,64 @@ function canonProps(props: Node[]): string {
 		.join(',');
 }
 
-// ------------------------------------------------------------------- sheet
+// ------------------------------------------------------------------- sheets
 
-function findSheets(source: string, ast: File): Sheet[] {
+/** Top-level `const x = <factory>({...})`. In the separate file only exported ones can be imported. */
+function findSheets(source: string, ast: File, factory: string, file?: string): Sheet[] {
 	const sheets: Sheet[] = [];
 	for (const stmt of ast.program.body) {
+		if (file && stmt.type !== 'ExportNamedDeclaration') {
+			continue;
+		}
 		const decl = stmt.type === 'ExportNamedDeclaration' ? stmt.declaration : stmt;
 		for (const d of decl?.type === 'VariableDeclaration' ? decl.declarations : []) {
 			const init = d.init;
-			if (d.id.type === 'Identifier' && init?.type === 'CallExpression' && text(source, init.callee) === FACTORY && init.arguments[0]?.type === 'ObjectExpression') {
-				sheets.push({ name: d.id.name, object: init.arguments[0] });
+			if (d.id.type === 'Identifier' && init?.type === 'CallExpression' && text(source, init.callee) === factory && init.arguments[0]?.type === 'ObjectExpression') {
+				sheets.push({ name: d.id.name, object: init.arguments[0], source, file });
 			}
 		}
 	}
 	return sheets;
 }
 
-/** Top-level `const x = StyleSheet.create({...})`; prefers the one named `styles`. */
-function findSheet(source: string, ast: File): Sheet | undefined {
-	const sheets = findSheets(source, ast);
-	return sheets.find((s) => s.name === SHEET) ?? sheets[0];
+export function siblingOf(opts: Pick<Options, 'placement' | 'fileName'>) {
+	if (opts.placement !== 'separateFile' || !opts.fileName || !opts.fileName.includes('.')) {
+		return undefined;
+	}
+	const dot = opts.fileName.lastIndexOf('.');
+	const base = opts.fileName.slice(0, dot);
+	return { file: `${base}.styles.${opts.fileName.slice(dot + 1).startsWith('t') ? 'ts' : 'js'}`, module: `./${base}.styles` };
+}
+
+function context(source: string, options: Partial<Options>): Ctx | undefined {
+	const opts = { ...DEFAULT_OPTIONS, ...options };
+	const ast = parseSource(source);
+	if (!ast) {
+		return undefined;
+	}
+	const base = siblingOf(opts);
+	const sibAst = base && opts.siblingText !== undefined ? parseSource(opts.siblingText) : undefined;
+	const sib = base && { ...base, ast: sibAst };
+	const external = sib && sibAst ? findSheets(opts.siblingText!, sibAst, opts.factory, sib.file) : [];
+	return { source, ast, opts, sib, sheets: [...findSheets(source, ast, opts.factory), ...external] };
+}
+
+/** The sheet a style at `offset` belongs with: the one its component already uses, else `styles`, else the first. */
+function sheetFor(ctx: Ctx, offset: number): Sheet | undefined {
+	const { sheets, ast, opts } = ctx;
+	if (sheets.length > 1) {
+		const component = ast.program.body.find((s) => within(s, offset));
+		let used: Sheet | undefined;
+		if (component) {
+			walk(component, (n) => {
+				used ??= n.type === 'Identifier' ? sheets.find((s) => s.name === n.name) : undefined;
+			});
+		}
+		if (used) {
+			return used;
+		}
+	}
+	return sheets.find((s) => s.name === opts.stylesName) ?? sheets[0];
 }
 
 const keyNames = (object: ObjectExpression) => object.properties.map(keyOf).filter((k): k is string => k !== undefined);
@@ -297,10 +368,12 @@ function reindent(snippet: string, from: string, to: string): string {
 
 const propLine = (source: string, p: Node, indent: string) => indent + reindent(text(source, p), lineIndent(source, p.start!), indent);
 const joinItems = (items: string[], comma: boolean) => items.join(',\n') + (comma ? ',' : '');
+const byKey = (a: string, b: string) => a.localeCompare(b, 'en');
 
 /** `key: {\n<props>\n}` at `indent`, props verbatim from the source. `comma` = trailing commas (match the file). */
-function entry(source: string, key: string, props: Node[], indent: string, unit: string, comma: boolean): string {
-	return `${indent}${key}: {\n${joinItems(props.map((p) => propLine(source, p, indent + unit)), comma)}\n${indent}}`;
+function entry(ctx: Ctx, p: Item, indent: string, unit: string, comma: boolean): string {
+	const props = ctx.opts.sortKeys ? [...p.fixed].sort((a, b) => byKey(keyOf(a) ?? '', keyOf(b) ?? '')) : p.fixed;
+	return `${indent}${p.key}: {\n${joinItems(props.map((x) => propLine(ctx.source, x, indent + unit)), comma)}\n${indent}}`;
 }
 
 /** Append items to an object literal, matching its indentation and trailing-comma style. */
@@ -324,19 +397,20 @@ function appendToObject(source: string, obj: ObjectExpression, unit: string, ren
 	return edits;
 }
 
-function importEdit(ast: File, source: string): Edit | undefined {
+/** Ensure `import { local } from 'from'`: already bound -> nothing; else extend an import from `from`, else add one. */
+function importEdit(ast: File, source: string, local: string, from: string): Edit | undefined {
 	const imports = ast.program.body.filter((n): n is ImportDeclaration => n.type === 'ImportDeclaration' && n.importKind !== 'type');
-	if (imports.some((i) => i.specifiers.some((s) => s.local.name === 'StyleSheet'))) {
+	if (imports.some((i) => i.specifiers.some((s) => s.local.name === local))) {
 		return undefined;
 	}
-	const rn = imports.find((i) => i.source.value === 'react-native' && i.specifiers.some((s) => s.type === 'ImportSpecifier'));
-	if (rn) {
-		const last = rn.specifiers.filter((s): s is ImportSpecifier => s.type === 'ImportSpecifier').at(-1)!;
-		const multiline = text(source, rn).includes('\n');
-		const added = multiline ? `,\n${lineIndent(source, last.start!)}StyleSheet` : ', StyleSheet';
+	const same = imports.find((i) => i.source.value === from && i.specifiers.some((s) => s.type === 'ImportSpecifier'));
+	if (same) {
+		const last = same.specifiers.filter((s): s is ImportSpecifier => s.type === 'ImportSpecifier').at(-1)!;
+		const multiline = text(source, same).includes('\n');
+		const added = multiline ? `,\n${lineIndent(source, last.start!)}${local}` : `, ${local}`;
 		return { start: last.end!, end: last.end!, text: added };
 	}
-	const line = "import { StyleSheet } from 'react-native';";
+	const line = `import { ${local} } from '${from}';`;
 	const lastImport = imports.at(-1);
 	if (lastImport) {
 		return { start: lastImport.end!, end: lastImport.end!, text: '\n' + line };
@@ -344,6 +418,23 @@ function importEdit(ast: File, source: string): Edit | undefined {
 	const at = ast.program.body[0]?.start ?? 0;
 	return { start: at, end: at, text: line + '\n\n' };
 }
+
+/** Inserts at the same spot concatenate in order (two inserts at one offset are order-fragile). */
+function mergeInserts(edits: Edit[]): Edit[] {
+	const out: Edit[] = [];
+	for (const e of edits) {
+		const prev = out.find((o) => o.file === e.file && o.start === e.start && o.end === o.start && e.end === e.start && !o.create);
+		if (prev) {
+			prev.text += e.text;
+		} else {
+			out.push({ ...e });
+		}
+	}
+	return out;
+}
+
+const tag = (edits: (Edit | undefined)[], file?: string): Edit[] => edits.flatMap((e) => (e ? [file ? { ...e, file } : e] : []));
+const wrapsStyleSheet = (factory: string) => factory === 'StyleSheet' || factory.startsWith('StyleSheet.');
 
 // ------------------------------------------------------------ edit builders
 
@@ -354,23 +445,97 @@ function replacement(source: string, loc: Located, ref: string, dynamic: Node[])
 	return { start: loc.object.start!, end: loc.object.end!, text: out };
 }
 
-function build(source: string, ast: File, sheet: Sheet | undefined, picks: Pick[]): Edit[] {
+/** Add the picks' keys to an existing sheet; with sortKeys and an already-sorted sheet, at their sorted spot. */
+function addToSheet(ctx: Ctx, sheet: Sheet, group: Item[]): Edit[] {
+	const { sortKeys } = ctx.opts;
+	const unit = detectIndent(sheet.source);
+	const items = sortKeys ? [...group].sort((a, b) => byKey(a.key, b.key)) : group;
+	const existing = keyNames(sheet.object);
+	const sorted = sortKeys && existing.every((k, i) => i === 0 || byKey(existing[i - 1], k) <= 0);
+	const before = new Map<Node, Item[]>();
+	const tail: Item[] = [];
+	for (const p of items) {
+		const next = sorted ? sheet.object.properties.find((q) => keyOf(q) !== undefined && byKey(keyOf(q)!, p.key) > 0) : undefined;
+		if (next) {
+			before.set(next, [...(before.get(next) ?? []), p]);
+		} else {
+			tail.push(p);
+		}
+	}
+	const edits: Edit[] = [];
+	for (const [next, picks] of before) {
+		const at = sheet.source.lastIndexOf('\n', next.start! - 1) + 1;
+		const own = /^\s*$/.test(sheet.source.slice(at, next.start!));
+		const body = joinItems(picks.map((p) => entry(ctx, p, lineIndent(sheet.source, next.start!), unit, true)), true);
+		edits.push({ start: own ? at : next.start!, end: own ? at : next.start!, text: body + '\n' });
+	}
+	if (tail.length) {
+		edits.push(...appendToObject(sheet.source, sheet.object, unit, (indent, comma) => joinItems(tail.map((p) => entry(ctx, p, indent, unit, comma)), comma)));
+	}
+	return tag(edits, sheet.file);
+}
+
+/** No sheet anywhere yet: create one at the bottom/top of the file, or in the separate file. */
+function newSheet(ctx: Ctx, group: Item[]): Edit[] {
+	const { source, ast, opts, sib } = ctx;
 	const unit = detectIndent(source);
-	const ref = sheet?.name ?? SHEET;
-	const edits = picks.map((p) => replacement(source, p.loc, `${ref}.${p.key}`, p.dynamic));
-	const imp = importEdit(ast, source);
-	if (imp) {
-		edits.push(imp);
+	const items = opts.sortKeys ? [...group].sort((a, b) => byKey(a.key, b.key)) : group;
+	const body = joinItems(items.map((p) => entry(ctx, p, unit, unit, true)), true);
+	const code = (exported: boolean) => `${exported ? 'export ' : ''}const ${opts.stylesName} = ${opts.factory}({\n${body}\n});`;
+	const bottom = (src: string, c: string): Edit => {
+		const end = src.trimEnd().length;
+		return { start: end, end: src.length, text: end ? `\n\n${c}\n` : `${c}\n` };
+	};
+
+	if (sib) {
+		if (opts.siblingText === undefined || !sib.ast) {
+			const head = wrapsStyleSheet(opts.factory) ? "import { StyleSheet } from 'react-native';\n\n" : '';
+			return [{ file: sib.file, create: true, start: 0, end: 0, text: `${head}${code(true)}\n` }];
+		}
+		return tag([bottom(opts.siblingText, code(true))], sib.file);
 	}
-	const added = picks.filter((p) => p.add);
-	if (added.length && sheet) {
-		edits.push(...appendToObject(source, sheet.object, unit, (indent, comma) => joinItems(added.map((p) => entry(source, p.key, p.fixed, indent, unit, comma)), comma)));
-	} else if (added.length) {
-		const code = `const ${SHEET} = ${FACTORY}({\n${joinItems(added.map((p) => entry(source, p.key, p.fixed, unit, unit, true)), true)}\n});`;
-		const end = source.trimEnd().length;
-		edits.push({ start: end, end: source.length, text: `\n\n${code}\n` });
+	if (opts.placement === 'top') {
+		const last = ast.program.body.filter((n) => n.type === 'ImportDeclaration').at(-1);
+		const at = last ? last.end! : (ast.program.body[0]?.start ?? 0);
+		return [{ start: at, end: at, text: last ? `\n\n${code(false)}` : `${code(false)}\n\n` }];
 	}
-	return edits;
+	return [bottom(source, code(false))];
+}
+
+function build(ctx: Ctx, picks: Item[]): Edit[] {
+	const { source, ast, opts, sib } = ctx;
+	const edits: Edit[] = [];
+	const groups = new Map<Sheet | undefined, Item[]>();
+	for (const p of picks.filter((x) => x.add)) {
+		groups.set(p.sheet, [...(groups.get(p.sheet) ?? []), p]);
+	}
+
+	// Imports first, so they sort ahead of a sheet inserted at the same spot.
+	const sheetImports = new Set<string>();
+	const touched = [...groups.keys()].map((sheet) => (sheet ? !!sheet.file : !!sib));
+	if (wrapsStyleSheet(opts.factory)) {
+		if (touched.includes(false)) {
+			edits.push(...tag([importEdit(ast, source, 'StyleSheet', 'react-native')]));
+		}
+		if (touched.includes(true) && sib?.ast && opts.siblingText !== undefined) {
+			edits.push(...tag([importEdit(sib.ast, opts.siblingText, 'StyleSheet', 'react-native')], sib.file));
+		}
+	}
+	for (const p of picks) {
+		const name = p.sheet ? (p.sheet.file ? p.sheet.name : undefined) : sib && p.add ? opts.stylesName : undefined;
+		if (name) {
+			sheetImports.add(name);
+		}
+	}
+	for (const name of sheetImports) {
+		edits.push(...tag([importEdit(ast, source, name, sib!.module)]));
+	}
+
+	edits.unshift(...picks.map((p) => replacement(source, p.loc, `${p.sheet?.name ?? opts.stylesName}.${p.key}`, p.dynamic)));
+	for (const [sheet, group] of groups) {
+		edits.push(...(sheet ? addToSheet(ctx, sheet, group) : newSheet(ctx, group)));
+	}
+	return mergeInserts(edits);
 }
 
 function uniqueName(base: string, used: ReadonlySet<string>): string {
@@ -389,7 +554,7 @@ export function validateName(name: string, used: ReadonlySet<string>): string | 
 	if (!/^[\p{ID_Start}$_][\p{ID_Continue}$‌‍]*$/u.test(name)) {
 		return `"${name}" is not a valid identifier`;
 	}
-	return used.has(name) ? `"${name}" is already defined in the style sheet` : undefined;
+	return used.has(name) ? `"${name}" is already defined in the style sheet (try "${uniqueName(name, used)}")` : undefined;
 }
 
 // ------------------------------------------------------------------ public
@@ -397,22 +562,21 @@ export function validateName(name: string, used: ReadonlySet<string>): string | 
 /** Offset of the style key inside the replacement (`edits[0]`) once all `edits` are applied. */
 export function keyOffset(edits: Edit[]): number {
 	const [ref] = edits;
-	const shift = edits.reduce((n, e) => (e.start < ref.start ? n + e.text.length - (e.end - e.start) : n), 0);
+	const shift = edits.reduce((n, e) => (!e.file && e.start < ref.start ? n + e.text.length - (e.end - e.start) : n), 0);
 	return ref.start + shift + ref.text.indexOf('.') + 1;
 }
 
 /** Extract the inline style under `offset`. */
-export function analyze(source: string, offset: number): Analysis | undefined {
-	const ast = parseSource(source);
-	const loc = ast && locateIn(ast, offset);
-	if (!ast || !loc) {
+export function analyze(source: string, offset: number, options: Partial<Options> = {}): Analysis | undefined {
+	const ctx = context(source, options);
+	const loc = ctx && locateIn(ctx.ast, offset);
+	if (!ctx || !loc) {
 		return undefined;
 	}
-	const sheet = findSheet(source, ast);
+	const sheet = sheetFor(ctx, offset);
 	const used = new Set(sheet ? keyNames(sheet.object) : []);
 	const { fixed, dynamic } = splitProps(loc.object);
 	const reuse = fixed.length && sheet ? findIdentical(sheet.object, fixed) : undefined;
-	const unit = detectIndent(source);
 	return {
 		defaultName: uniqueName(baseName(loc), used),
 		usedNames: used,
@@ -423,58 +587,69 @@ export function analyze(source: string, offset: number): Analysis | undefined {
 			if (!fixed.length) {
 				return [];
 			}
-			return build(source, ast, sheet, [{ loc, key: reuse ?? name, fixed, dynamic, add: !reuse }]);
+			return build(ctx, [{ loc, sheet, key: reuse ?? name, fixed, dynamic, add: !reuse }]);
 		},
 		mergeEdits(key) {
 			const target = sheet && objectEntries(sheet.object).find((e) => e.key === key)?.value;
 			if (!sheet || !target || !fixed.length) {
 				return [];
 			}
-			const edits = [replacement(source, loc, `${sheet.name}.${key}`, dynamic)];
+			const edits = [replacement(ctx.source, loc, `${sheet.name}.${key}`, dynamic)];
+			const sheetEdits: Edit[] = [];
 			const fresh: Node[] = [];
 			for (const p of fixed) {
 				const old = target.properties.find((q) => keyOf(q) !== undefined && keyOf(q) === keyOf(p));
 				if (!old) {
 					fresh.push(p);
 				} else if (old.type === 'ObjectProperty' && p.type === 'ObjectProperty' && canon(old.value) !== canon(p.value)) {
-					edits.push({ start: old.value.start!, end: old.value.end!, text: text(source, p.value) });
+					sheetEdits.push({ start: old.value.start!, end: old.value.end!, text: text(ctx.source, p.value) });
 				}
 			}
 			if (fresh.length) {
-				edits.push(...appendToObject(source, target, unit, (indent, comma) => joinItems(fresh.map((p) => propLine(source, p, indent)), comma)));
+				const ordered = ctx.opts.sortKeys ? [...fresh].sort((a, b) => byKey(keyOf(a) ?? '', keyOf(b) ?? '')) : fresh;
+				sheetEdits.push(...appendToObject(sheet.source, target, detectIndent(sheet.source), (indent, comma) => joinItems(ordered.map((p) => propLine(ctx.source, p, indent)), comma)));
 			}
-			return edits;
+			if (sheet.file) {
+				edits.push(...tag([importEdit(ctx.ast, ctx.source, sheet.name, ctx.sib!.module)]));
+			}
+			return mergeInserts([...edits, ...tag(sheetEdits, sheet.file)]);
 		},
 	};
 }
 
 /** Extract every inline style in the file, reusing identical ones. */
-export function analyzeAll(source: string): { count: number; edits(): Edit[] } | undefined {
-	const ast = parseSource(source);
-	if (!ast) {
+export function analyzeAll(source: string, options: Partial<Options> = {}): { count: number; edits(): Edit[] } | undefined {
+	const ctx = context(source, options);
+	if (!ctx) {
 		return undefined;
 	}
-	const sheet = findSheet(source, ast);
-	const used = new Set(sheet ? keyNames(sheet.object) : []);
-	const made = new Map<string, string>(); // fingerprint -> key created in this run
-	const picks: Pick[] = [];
-	for (const loc of allLocated(ast)) {
+	const used = new Map<Sheet | undefined, Set<string>>();
+	const made = new Map<string, string>(); // sheet + fingerprint -> key created in this run
+	const ids = new Map<Sheet | undefined, number>();
+	const picks: Item[] = [];
+	for (const loc of allLocated(ctx.ast)) {
 		const { fixed, dynamic } = splitProps(loc.object);
 		if (!fixed.length) {
 			continue;
 		}
-		const sig = canonProps(fixed);
+		const sheet = sheetFor(ctx, loc.object.start!);
+		if (!used.has(sheet)) {
+			used.set(sheet, new Set(sheet ? keyNames(sheet.object) : []));
+			ids.set(sheet, ids.size);
+		}
+		const taken = used.get(sheet)!;
+		const sig = `${ids.get(sheet)}|${canonProps(fixed)}`;
 		const existing = (sheet && findIdentical(sheet.object, fixed)) ?? made.get(sig);
 		if (existing) {
-			picks.push({ loc, key: existing, fixed, dynamic, add: false });
+			picks.push({ loc, sheet, key: existing, fixed, dynamic, add: false });
 			continue;
 		}
-		const key = uniqueName(baseName(loc), used);
-		used.add(key);
+		const key = uniqueName(baseName(loc), taken);
+		taken.add(key);
 		made.set(sig, key);
-		picks.push({ loc, key, fixed, dynamic, add: true });
+		picks.push({ loc, sheet, key, fixed, dynamic, add: true });
 	}
-	return picks.length ? { count: picks.length, edits: () => build(source, ast, sheet, picks) } : undefined;
+	return picks.length ? { count: picks.length, edits: () => build(ctx, picks) } : undefined;
 }
 
 /** Ranges of inline style objects that have something to extract (for hints). */
@@ -491,17 +666,17 @@ function memberKey(m: MemberExpression): string | undefined {
 }
 
 /** Reverse of extract: replace `styles.key` under `offset` with the entry's object literal. */
-export function analyzeInline(source: string, offset: number): { key: string; edits(): Edit[] } | undefined {
-	const ast = parseSource(source);
-	const hit = ast && attrAt(ast, offset);
+export function analyzeInline(source: string, offset: number, options: Partial<Options> = {}): { key: string; edits(): Edit[] } | undefined {
+	const ctx = context(source, options);
+	const hit = ctx && attrAt(ctx.ast, offset);
 	const expr = hit && expressionOf(hit.attr);
-	if (!ast || !expr) {
+	if (!ctx || !expr) {
 		return undefined;
 	}
 	const members = expr.type === 'MemberExpression' ? [expr] : expr.type === 'ArrayExpression' ? expr.elements.filter((e): e is MemberExpression => e?.type === 'MemberExpression') : [];
 	const ref = members.find((m) => within(m, offset)) ?? (members.length === 1 ? members[0] : undefined);
 	const key = ref && memberKey(ref);
-	const sheet = ref?.object.type === 'Identifier' ? findSheets(source, ast).find((s) => s.name === (ref.object as { name: string }).name) : undefined;
+	const sheet = ref?.object.type === 'Identifier' ? ctx.sheets.find((s) => s.name === (ref.object as { name: string }).name) : undefined;
 	const entryOf = sheet && key !== undefined ? objectEntries(sheet.object).find((e) => e.key === key) : undefined;
 	if (!ref || !sheet || !entryOf || key === undefined) {
 		return undefined;
@@ -510,19 +685,20 @@ export function analyzeInline(source: string, offset: number): { key: string; ed
 	return {
 		key,
 		edits() {
-			const props = value.properties.map((p) => text(source, p));
+			const props = value.properties.map((p) => text(sheet.source, p));
 			const literal = props.some((p) => p.includes('\n'))
-				? reindent(text(source, value), lineIndent(source, prop.start!), lineIndent(source, ref.start!))
+				? reindent(text(sheet.source, value), lineIndent(sheet.source, prop.start!), lineIndent(source, ref.start!))
 				: props.length
 					? `{ ${props.join(', ')} }`
 					: '{}';
 			const edits: Edit[] = [{ start: ref.start!, end: ref.end!, text: literal }];
 
 			// Drop the key too when this was its only use and nothing touches the sheet as a whole.
+			// Other files may use a separate styles file's keys, so those stay.
 			let uses = 0;
-			let unsafe = false;
-			walk(ast.program, (n, parent) => {
-				if (n.type !== 'Identifier' || n.name !== sheet.name || (parent?.type === 'VariableDeclarator' && parent.id === n)) {
+			let unsafe = !!sheet.file;
+			walk(ctx.ast.program, (n, parent) => {
+				if (n.type !== 'Identifier' || n.name !== sheet.name || (parent?.type === 'VariableDeclarator' && parent.id === n) || parent?.type === 'ImportSpecifier') {
 					return;
 				}
 				const k = parent?.type === 'MemberExpression' && parent.object === n ? memberKey(parent) : undefined;
@@ -532,9 +708,9 @@ export function analyzeInline(source: string, offset: number): { key: string; ed
 					unsafe = true;
 				}
 			});
-			const lineStart = source.lastIndexOf('\n', prop.start! - 1) + 1;
-			const tail = /^[ \t]*,?[ \t]*(\r?\n|$)/.exec(source.slice(prop.end!));
-			if (!unsafe && uses === 1 && tail && /^[ \t]*$/.test(source.slice(lineStart, prop.start!))) {
+			const lineStart = sheet.source.lastIndexOf('\n', prop.start! - 1) + 1;
+			const tail = /^[ \t]*,?[ \t]*(\r?\n|$)/.exec(sheet.source.slice(prop.end!));
+			if (!unsafe && uses === 1 && tail && /^[ \t]*$/.test(sheet.source.slice(lineStart, prop.start!))) {
 				edits.push({ start: lineStart, end: prop.end! + tail[0].length, text: '' });
 			}
 			return edits;

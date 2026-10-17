@@ -1,5 +1,6 @@
+import * as path from 'path';
 import * as vscode from 'vscode';
-import { analyze, analyzeAll, analyzeInline, Edit, inlineStyleRanges, keyOffset, validateName } from './transform';
+import { analyze, analyzeAll, analyzeInline, Edit, inlineStyleRanges, keyOffset, Options, siblingOf, validateName } from './transform';
 
 const LANGUAGES = ['javascript', 'javascriptreact', 'typescript', 'typescriptreact'];
 const TITLE = 'Extract to StyleSheet';
@@ -54,9 +55,10 @@ export function activate(context: vscode.ExtensionContext) {
 	vscode.workspace.textDocuments.forEach(refresh);
 }
 
-function provideCodeActions(document: vscode.TextDocument, range: vscode.Range, context: vscode.CodeActionContext) {
+async function provideCodeActions(document: vscode.TextDocument, range: vscode.Range, context: vscode.CodeActionContext) {
 	const text = document.getText();
 	const offset = document.offsetAt(range.start);
+	const options = await optionsFor(document);
 	const actions: vscode.CodeAction[] = [];
 	const add = (title: string, kind: vscode.CodeActionKind, id: string, at: number, diagnostic?: vscode.Diagnostic) => {
 		const action = new vscode.CodeAction(title, kind);
@@ -68,7 +70,7 @@ function provideCodeActions(document: vscode.TextDocument, range: vscode.Range, 
 		actions.push(action);
 	};
 
-	const analysis = analyze(text, offset);
+	const analysis = analyze(text, offset, options);
 	if (analysis) {
 		add(TITLE, vscode.CodeActionKind.RefactorExtract, 'stylelift.extractStyle', offset);
 		if (!analysis.warning && !analysis.reuse) {
@@ -81,7 +83,7 @@ function provideCodeActions(document: vscode.TextDocument, range: vscode.Range, 
 			add('Extract all inline styles', vscode.CodeActionKind.RefactorExtract, 'stylelift.extractAll', offset);
 		}
 	}
-	if (analyzeInline(text, offset)) {
+	if (analyzeInline(text, offset, options)) {
 		add('Inline style', vscode.CodeActionKind.RefactorInline, 'stylelift.inlineStyle', offset);
 	}
 	// The hint's own quick fix: the cursor may be elsewhere, so point at the diagnostic.
@@ -94,14 +96,48 @@ function provideCodeActions(document: vscode.TextDocument, range: vscode.Range, 
 async function target(uri?: vscode.Uri, offset?: number) {
 	const editor = vscode.window.activeTextEditor;
 	const document = uri ? await vscode.workspace.openTextDocument(uri) : editor?.document;
-	return document && { document, offset: offset ?? (editor ? document.offsetAt(editor.selection.start) : 0) };
+	return document && { document, offset: offset ?? (editor ? document.offsetAt(editor.selection.start) : 0), options: await optionsFor(document) };
 }
 
-// One WorkspaceEdit = one undo step for every change together.
-function apply(document: vscode.TextDocument, edits: Edit[]) {
+/** Settings, plus (for the separate-file placement) what the styles file next to `document` holds now. */
+async function optionsFor(document: vscode.TextDocument): Promise<Partial<Options>> {
+	const cfg = vscode.workspace.getConfiguration('rnStyleExtract');
+	const options: Partial<Options> = {
+		stylesName: cfg.get('stylesName', 'styles'),
+		placement: cfg.get('placement', 'bottom'),
+		factory: cfg.get('factory', 'StyleSheet.create'),
+		sortKeys: cfg.get('sortKeys', false),
+		fileName: path.basename(document.fileName),
+	};
+	const sib = document.uri.scheme === 'file' ? siblingOf({ placement: options.placement!, fileName: options.fileName }) : undefined;
+	if (sib) {
+		const uri = vscode.Uri.joinPath(document.uri, '..', sib.file);
+		try {
+			const open = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri.toString());
+			options.siblingText = open ? open.getText() : new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
+		} catch {
+			// no styles file yet: it gets created
+		}
+	}
+	return options;
+}
+
+// One WorkspaceEdit = one undo step for every change together, in every file it touches.
+async function apply(document: vscode.TextDocument, edits: Edit[]) {
 	const edit = new vscode.WorkspaceEdit();
+	const range = (doc: vscode.TextDocument, e: Edit) => new vscode.Range(doc.positionAt(e.start), doc.positionAt(e.end));
 	for (const e of edits) {
-		edit.replace(document.uri, new vscode.Range(document.positionAt(e.start), document.positionAt(e.end)), e.text);
+		if (!e.file) {
+			edit.replace(document.uri, range(document, e), e.text);
+			continue;
+		}
+		const uri = vscode.Uri.joinPath(document.uri, '..', e.file);
+		if (e.create) {
+			edit.createFile(uri, { ignoreIfExists: true });
+			edit.insert(uri, new vscode.Position(0, 0), e.text);
+		} else {
+			edit.replace(uri, range(await vscode.workspace.openTextDocument(uri), e), e.text);
+		}
 	}
 	return vscode.workspace.applyEdit(edit);
 }
@@ -116,7 +152,7 @@ async function extract(rename: boolean, uri?: vscode.Uri, offset?: number) {
 	}
 	const { document } = t;
 	const version = document.version;
-	const analysis = analyze(document.getText(), t.offset);
+	const analysis = analyze(document.getText(), t.offset, t.options);
 	if (!analysis) {
 		vscode.window.showInformationMessage(NOT_ON_STYLE);
 		return;
@@ -159,7 +195,7 @@ async function extract(rename: boolean, uri?: vscode.Uri, offset?: number) {
 
 async function mergeIntoStyle(uri?: vscode.Uri, offset?: number) {
 	const t = await target(uri, offset);
-	const analysis = t && analyze(t.document.getText(), t.offset);
+	const analysis = t && analyze(t.document.getText(), t.offset, t.options);
 	if (!t || !analysis || analysis.warning || !analysis.mergeKeys.length) {
 		vscode.window.showInformationMessage('Nothing to merge: needs an inline style with static values and an existing style sheet.');
 		return;
@@ -178,7 +214,7 @@ async function mergeIntoStyle(uri?: vscode.Uri, offset?: number) {
 
 async function extractAll(uri?: vscode.Uri, offset?: number) {
 	const t = await target(uri, offset);
-	const all = t && analyzeAll(t.document.getText());
+	const all = t && analyzeAll(t.document.getText(), t.options);
 	if (!t || !all) {
 		vscode.window.showInformationMessage('No inline styles with static values in this file.');
 		return;
@@ -189,7 +225,7 @@ async function extractAll(uri?: vscode.Uri, offset?: number) {
 
 async function inlineStyle(uri?: vscode.Uri, offset?: number) {
 	const t = await target(uri, offset);
-	const inline = t && analyzeInline(t.document.getText(), t.offset);
+	const inline = t && analyzeInline(t.document.getText(), t.offset, t.options);
 	if (!t || !inline) {
 		vscode.window.showInformationMessage('Put the cursor on a styles.<name> reference to inline it.');
 		return;

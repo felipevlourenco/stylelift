@@ -12,7 +12,7 @@ test('validateName: legal identifier, not already used', () => {
 	assert.match(validateName('1a', used)!, /not a valid identifier/);
 	assert.match(validateName('my-style', used)!, /not a valid identifier/);
 	assert.match(validateName('a b', used)!, /not a valid identifier/);
-	assert.match(validateName('container', used)!, /already defined/);
+	assert.match(validateName('container', used)!, /already defined .*try "container2"/);
 });
 
 test('analyze reports keys already in the sheet, quoted ones included', () => {
