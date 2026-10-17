@@ -44,6 +44,11 @@ test('innermost style attribute wins', () => {
 	assert.equal(objectAt(`const a = ${outer.replace('margin', 'mar|gin')};`)?.element, 'Row');
 });
 
+test('any prop named style or ending in Style', () => {
+	assert.equal(objectAt('const a = <ScrollView contentContainerStyle={{ fl|ex: 1 }} />;')?.text, '{ flex: 1 }');
+	assert.equal(objectAt('const a = <FlatList columnWrapperStyle={[{ g|ap: 1 }]} />;')?.text, '{ gap: 1 }');
+});
+
 test('member element names use the last segment', () => {
 	assert.equal(objectAt('const a = <Animated.View style={{ o|pacity: 0 }} />;')?.element, 'View');
 });
@@ -59,7 +64,8 @@ test('array style: the object under the cursor, or the only one', () => {
 test('things that are not inline style objects', () => {
 	assert.equal(objectAt('const a = <View style={sty|les.a} />;'), undefined);
 	assert.equal(objectAt('const a = <View style={cond ? { a: 1 } : |{ b: 2 }} />;'), undefined);
-	assert.equal(objectAt('const a = <View contentContainerStyle={{ fl|ex: 1 }} />;'), undefined);
+	assert.equal(objectAt('const a = <View headerStyl={{ fl|ex: 1 }} />;'), undefined);
+	assert.equal(objectAt('const a = <View Style={{ fl|ex: 1 }} />;'), undefined);
 	assert.equal(objectAt('const a = <div style={{ col|or: "red" }} />;'), undefined);
 });
 

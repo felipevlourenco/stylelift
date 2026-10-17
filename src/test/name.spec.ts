@@ -1,6 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { analyze, validateName } from '../transform';
+import { analyze, inlineStyleRanges, keyOffset, validateName } from '../transform';
+import { applyEdits } from './apply';
 
 test('validateName: legal identifier, not already used', () => {
 	const used = new Set(['container']);
@@ -26,4 +27,17 @@ test('warning when nothing is static, none otherwise', () => {
 	assert.match(warn('<View style={{ ...rest, p: 1 }} />')!, /Nothing to extract/);
 	assert.match(warn('<View style={{}} />')!, /Nothing to extract/);
 	assert.equal(warn('<View style={{ w: size, p: 1 }} />'), undefined);
+});
+
+test('inlineStyleRanges: only styles with something static to extract', () => {
+	const src = `<View style={{ a: 1 }}><View style={{ w: size }} /><View style={[s.x, { b: 2, w: size }]} /></View>`;
+	const ranges = inlineStyleRanges(src).map((r) => src.slice(r.start, r.end));
+	assert.deepEqual(ranges, ['{ a: 1 }', '{ b: 2, w: size }']);
+});
+
+test('keyOffset points at the new key in the edited text', () => {
+	const src = `import { View } from 'react-native';\nconst a = <View style={{ a: 1, w: size }} />;\n`;
+	const edits = analyze(src, src.indexOf('a: 1'))!.edits('box');
+	const out = applyEdits(src, edits);
+	assert.equal(out.slice(keyOffset(edits)).startsWith('box'), true);
 });
