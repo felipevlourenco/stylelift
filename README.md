@@ -1,71 +1,91 @@
-# stylelift README
+# StyleLift
 
-This is the README for your extension "stylelift". After writing up a brief description, we recommend including the following sections.
+Extract inline styles from React Native components into `StyleSheet.create`, with one action.
+
+Put the cursor on `style={{ … }}`, press <kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>.</kbd>, and StyleLift moves the styles into the file's style sheet (creating it and the import if needed), names them, and leaves your formatting alone. Works in JS, JSX, TS and TSX, and it parses your code, so no regex guessing.
+
+![StyleLift demo](images/demo.gif)
 
 ## Features
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+### Extract with one action
 
-For example if there is an image subfolder under your extension project workspace:
+Inline styles get a subtle hint. Open the quick fix menu (<kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>.</kbd>) and choose **Extract to StyleSheet**.
 
-\!\[feature X\]\(images/feature-x.png\)
+![Quick fix menu on an inline style](images/actions.png)
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+Pick a name (the default comes from the element: `View` → `container`, `Text` → `text`, `Image` → `image`; it's checked to be a valid identifier and not already used)…
 
-## Requirements
+![Name prompt](images/prompt.png)
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+…and the style moves into `StyleSheet.create`. A missing `StyleSheet` import is added too. It all happens in a single edit, so one undo reverts everything.
 
-## Extension Settings
+![Result: styles.container and a new StyleSheet](images/result.png)
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
+### Static and dynamic values, split
 
-For example:
+Values that depend on props, state or variables stay inline; only the static part moves:
 
-This extension contributes the following settings:
+```tsx
+<Image style={{ width: size, height: size, borderRadius: 8 }} />
+// becomes
+<Image style={[styles.avatar, { width: size, height: size }]} />
+```
 
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+![Static part extracted, dynamic part kept inline](images/dynamic.png)
 
-## Known Issues
+Inside an array style (`style={[styles.a, { margin: 4 }]}`) only the object literal is replaced. If nothing in the style is static you get a warning instead of an edit.
 
-Calling out known issues can help limit users opening duplicate issues against your extension.
+### More
 
-## Release Notes
+- **Extract all**: move every inline style in the file in one action.
+- **Reuse identical styles**: if the sheet already has a key with exactly the same values (key order and quotes don't matter), that key is reused instead of adding a duplicate.
+- **Merge into existing style**: pick an existing key and merge the inline values into it.
+- **Extract and rename**: extract with the suggested name, then jump straight into rename on the new key.
+- **Inline style** (the reverse): on `styles.container`, replace the reference with its object literal. The key is removed from the sheet when that was its only use.
+- **Other style props**: works on `style` and any prop ending in `Style`: `contentContainerStyle`, `columnWrapperStyle`, `imageStyle`, …
+- **Separate file**: put new styles in `Component.styles.ts` and import them.
+- **Several components / sheets**: new styles go to the sheet the component already uses; a sheet can have any name.
+- **Formatting is preserved**: indentation (tabs or spaces), trailing commas, and multi-line imports are matched.
 
-Users appreciate release notes as you update your extension.
+Not touched: lowercase tags (`<div style>`, those are DOM, not React Native).
 
-### 1.0.0
+## Settings
 
-Initial release of ...
+| Setting | Default | |
+| --- | --- | --- |
+| `rnStyleExtract.stylesName` | `styles` | Variable name for a new style sheet. An existing sheet, with any name, is reused. |
+| `rnStyleExtract.placement` | `bottom` | Where a new sheet goes: `bottom`, `top` (after the imports) or `separateFile` (`Component.styles.ts`). |
+| `rnStyleExtract.factory` | `StyleSheet.create` | Call that wraps the styles. The `StyleSheet` import is added automatically only for `StyleSheet.create`. A custom factory must take the styles object as its first argument. |
+| `rnStyleExtract.sortKeys` | `false` | Sort the new style's properties alphabetically, and place the new key in sorted position when the sheet is already sorted. Existing code is never reordered. |
+| `rnStyleExtract.showHints` | `true` | Show a hint on inline styles that can be extracted. |
 
-### 1.0.1
+## Commands
 
-Fixed issue #.
+All are in the Command Palette under **StyleLift** and in the quick fix / refactor menu:
 
-### 1.1.0
+- Extract Inline Style to StyleSheet
+- Extract Inline Style to StyleSheet and Rename
+- Merge Inline Style into Existing Style
+- Extract All Inline Styles in File
+- Inline Style Reference
 
-Added features X, Y, and Z.
+## What counts as static
 
----
+Numbers, strings, booleans, `null`, negative numbers, template literals without expressions, `'absolute' as const`, and arrays or objects made of those (`transform: [{ scale: 2 }]`). Anything else (identifiers, member access, calls, conditionals, spreads) stays inline. Properties written after a spread or a computed key also stay, because moving them would let the spread override them.
 
-## Following extension guidelines
+## Development
 
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
+```bash
+pnpm install
+pnpm dev          # build and open an Extension Development Host on test-fixtures/
+pnpm run test:unit
+pnpm test         # also runs the tests inside a real VS Code
+pnpm run vsix     # package a .vsix
+```
 
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
+`scripts/capture-media.mjs` regenerates the icon and the images in this README by driving a real VS Code.
 
-## Working with Markdown
+## License
 
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+No license has been chosen yet.

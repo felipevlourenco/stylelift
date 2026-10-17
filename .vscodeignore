@@ -12,3 +12,10 @@ vsc-extension-quickstart.md
 **/*.map
 **/*.ts
 **/.vscode-test.*
+.npmrc
+pnpm-lock.yaml
+test-fixtures/**
+scripts/**
+images/**
+!images/icon.png
+*.vsix

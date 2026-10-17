@@ -1,10 +1,34 @@
 {
   "name": "stylelift",
   "displayName": "StyleLift",
-  "description": "Extract inline styles from React Native components into a dedicated StyleSheet.create() object with a single action.",
-  "version": "0.0.1",
+  "description": "Extract inline styles from React Native components into StyleSheet.create with one action: smart naming, dynamic-value split, extract all, reuse and merge.",
+  "version": "1.0.0",
+  "publisher": "felipelourenco",
+  "icon": "images/icon.png",
+  "galleryBanner": {
+    "color": "#4F46E5",
+    "theme": "dark"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/felipevlourenco/stylelift.git"
+  },
+  "bugs": {
+    "url": "https://github.com/felipevlourenco/stylelift/issues"
+  },
+  "homepage": "https://github.com/felipevlourenco/stylelift#readme",
+  "keywords": [
+    "react native",
+    "stylesheet",
+    "inline styles",
+    "refactor",
+    "extract",
+    "code action",
+    "typescript",
+    "jsx"
+  ],
   "engines": {
-    "vscode": "^1.140.0"
+    "vscode": "^1.90.0"
   },
   "categories": [
     "Other"
@@ -96,17 +120,22 @@
     "lint": "eslint src",
     "test": "vscode-test",
     "test:unit": "tsc -p . --outDir out && node --test \"out/test/*.spec.js\"",
-    "dev": "pnpm run compile && code --new-window --extensionDevelopmentPath=\"$PWD\" test-fixtures"
+    "dev": "pnpm run compile && code --new-window --extensionDevelopmentPath=\"$PWD\" test-fixtures",
+    "vsix": "vsce package --no-dependencies"
   },
   "devDependencies": {
     "@babel/parser": "^7.29.9",
     "@babel/types": "^7.29.8",
     "@types/mocha": "^10.0.10",
     "@types/node": "24.x",
-    "@types/vscode": "^1.140.0",
+    "@types/pngjs": "^6.0.5",
+    "@types/vscode": "^1.90.0",
     "@vscode/test-cli": "^0.0.15",
     "@vscode/test-electron": "^3.0.0",
+    "@vscode/vsce": "^4.0.0",
     "eslint": "^10.5.0",
+    "gifenc": "^1.0.3",
+    "pngjs": "^7.0.0",
     "ts-loader": "^9.6.2",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.61.1",
