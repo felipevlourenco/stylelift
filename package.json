@@ -22,8 +22,38 @@
         "command": "stylelift.extractStyle",
         "title": "Extract Inline Style to StyleSheet",
         "category": "StyleLift"
+      },
+      {
+        "command": "stylelift.extractAndRename",
+        "title": "Extract Inline Style to StyleSheet and Rename",
+        "category": "StyleLift"
+      },
+      {
+        "command": "stylelift.mergeIntoStyle",
+        "title": "Merge Inline Style into Existing Style",
+        "category": "StyleLift"
+      },
+      {
+        "command": "stylelift.extractAll",
+        "title": "Extract All Inline Styles in File",
+        "category": "StyleLift"
+      },
+      {
+        "command": "stylelift.inlineStyle",
+        "title": "Inline Style Reference",
+        "category": "StyleLift"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "StyleLift",
+      "properties": {
+        "rnStyleExtract.showHints": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a hint on inline styles that can be extracted."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "pnpm run package",
