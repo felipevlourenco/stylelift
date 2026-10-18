@@ -88,4 +88,4 @@ pnpm run vsix     # package a .vsix
 
 ## License
 
-No license has been chosen yet.
+[MIT](LICENSE)

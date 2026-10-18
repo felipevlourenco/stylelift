@@ -1,149 +1,150 @@
 {
-  "name": "stylelift",
-  "displayName": "StyleLift",
-  "description": "Extract inline styles from React Native components into StyleSheet.create with one action: smart naming, dynamic-value split, extract all, reuse and merge.",
-  "version": "1.0.0",
-  "publisher": "felipelourenco",
-  "icon": "images/icon.png",
-  "galleryBanner": {
-    "color": "#4F46E5",
-    "theme": "dark"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/felipevlourenco/stylelift.git"
-  },
-  "bugs": {
-    "url": "https://github.com/felipevlourenco/stylelift/issues"
-  },
-  "homepage": "https://github.com/felipevlourenco/stylelift#readme",
-  "keywords": [
-    "react native",
-    "stylesheet",
-    "inline styles",
-    "refactor",
-    "extract",
-    "code action",
-    "typescript",
-    "jsx"
-  ],
-  "engines": {
-    "vscode": "^1.90.0"
-  },
-  "categories": [
-    "Other"
-  ],
-  "activationEvents": [
-    "onLanguage:javascript",
-    "onLanguage:javascriptreact",
-    "onLanguage:typescript",
-    "onLanguage:typescriptreact"
-  ],
-  "main": "./dist/extension.js",
-  "contributes": {
-    "commands": [
-      {
-        "command": "stylelift.extractStyle",
-        "title": "Extract Inline Style to StyleSheet",
-        "category": "StyleLift"
-      },
-      {
-        "command": "stylelift.extractAndRename",
-        "title": "Extract Inline Style to StyleSheet and Rename",
-        "category": "StyleLift"
-      },
-      {
-        "command": "stylelift.mergeIntoStyle",
-        "title": "Merge Inline Style into Existing Style",
-        "category": "StyleLift"
-      },
-      {
-        "command": "stylelift.extractAll",
-        "title": "Extract All Inline Styles in File",
-        "category": "StyleLift"
-      },
-      {
-        "command": "stylelift.inlineStyle",
-        "title": "Inline Style Reference",
-        "category": "StyleLift"
-      }
+    "name": "stylelift",
+    "displayName": "StyleLift",
+    "description": "Extract inline styles from React Native components into StyleSheet.create with one action: smart naming, dynamic-value split, extract all, reuse and merge.",
+    "version": "1.0.1",
+    "publisher": "felipelourenco",
+    "license": "MIT",
+    "icon": "images/icon.png",
+    "galleryBanner": {
+        "color": "#4F46E5",
+        "theme": "dark"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/felipevlourenco/stylelift.git"
+    },
+    "bugs": {
+        "url": "https://github.com/felipevlourenco/stylelift/issues"
+    },
+    "homepage": "https://github.com/felipevlourenco/stylelift#readme",
+    "keywords": [
+        "react native",
+        "stylesheet",
+        "inline styles",
+        "refactor",
+        "extract",
+        "code action",
+        "typescript",
+        "jsx"
     ],
-    "configuration": {
-      "title": "StyleLift",
-      "properties": {
-        "rnStyleExtract.showHints": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show a hint on inline styles that can be extracted."
-        },
-        "rnStyleExtract.stylesName": {
-          "type": "string",
-          "default": "styles",
-          "description": "Variable name for a style sheet StyleLift creates."
-        },
-        "rnStyleExtract.placement": {
-          "type": "string",
-          "enum": [
-            "bottom",
-            "top",
-            "separateFile"
-          ],
-          "default": "bottom",
-          "description": "Where a new style sheet goes: bottom or top of the file, or a separate Component.styles.ts next to it. An existing style sheet in the file is always reused.",
-          "enumDescriptions": [
-            "At the end of the file",
-            "After the imports",
-            "In Component.styles.ts, imported by the component"
-          ]
-        },
-        "rnStyleExtract.factory": {
-          "type": "string",
-          "default": "StyleSheet.create",
-          "description": "Call that wraps the styles, e.g. StyleSheet.create or a custom helper. The StyleSheet import is only added automatically for StyleSheet.create."
-        },
-        "rnStyleExtract.sortKeys": {
-          "type": "boolean",
-          "default": false,
-          "description": "Sort style keys alphabetically (the new style's properties, and its place in an already-sorted style sheet)."
+    "engines": {
+        "vscode": "^1.90.0"
+    },
+    "categories": [
+        "Other"
+    ],
+    "activationEvents": [
+        "onLanguage:javascript",
+        "onLanguage:javascriptreact",
+        "onLanguage:typescript",
+        "onLanguage:typescriptreact"
+    ],
+    "main": "./dist/extension.js",
+    "contributes": {
+        "commands": [
+            {
+                "command": "stylelift.extractStyle",
+                "title": "Extract Inline Style to StyleSheet",
+                "category": "StyleLift"
+            },
+            {
+                "command": "stylelift.extractAndRename",
+                "title": "Extract Inline Style to StyleSheet and Rename",
+                "category": "StyleLift"
+            },
+            {
+                "command": "stylelift.mergeIntoStyle",
+                "title": "Merge Inline Style into Existing Style",
+                "category": "StyleLift"
+            },
+            {
+                "command": "stylelift.extractAll",
+                "title": "Extract All Inline Styles in File",
+                "category": "StyleLift"
+            },
+            {
+                "command": "stylelift.inlineStyle",
+                "title": "Inline Style Reference",
+                "category": "StyleLift"
+            }
+        ],
+        "configuration": {
+            "title": "StyleLift",
+            "properties": {
+                "rnStyleExtract.showHints": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Show a hint on inline styles that can be extracted."
+                },
+                "rnStyleExtract.stylesName": {
+                    "type": "string",
+                    "default": "styles",
+                    "description": "Variable name for a style sheet StyleLift creates."
+                },
+                "rnStyleExtract.placement": {
+                    "type": "string",
+                    "enum": [
+                        "bottom",
+                        "top",
+                        "separateFile"
+                    ],
+                    "default": "bottom",
+                    "description": "Where a new style sheet goes: bottom or top of the file, or a separate Component.styles.ts next to it. An existing style sheet in the file is always reused.",
+                    "enumDescriptions": [
+                        "At the end of the file",
+                        "After the imports",
+                        "In Component.styles.ts, imported by the component"
+                    ]
+                },
+                "rnStyleExtract.factory": {
+                    "type": "string",
+                    "default": "StyleSheet.create",
+                    "description": "Call that wraps the styles, e.g. StyleSheet.create or a custom helper. The StyleSheet import is only added automatically for StyleSheet.create."
+                },
+                "rnStyleExtract.sortKeys": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Sort style keys alphabetically (the new style's properties, and its place in an already-sorted style sheet)."
+                }
+            }
         }
-      }
+    },
+    "scripts": {
+        "vscode:prepublish": "pnpm run package",
+        "compile": "webpack",
+        "watch": "webpack --watch",
+        "package": "webpack --mode production --devtool hidden-source-map",
+        "compile-tests": "tsc -p . --outDir out",
+        "watch-tests": "tsc -p . -w --outDir out",
+        "pretest": "pnpm run compile-tests && pnpm run compile && pnpm run lint",
+        "lint": "eslint src",
+        "test": "vscode-test",
+        "test:unit": "tsc -p . --outDir out && node --test \"out/test/*.spec.js\"",
+        "dev": "pnpm run compile && code --new-window --extensionDevelopmentPath=\"$PWD\" test-fixtures",
+        "vsix": "vsce package --no-dependencies"
+    },
+    "devDependencies": {
+        "@babel/parser": "^7.29.9",
+        "@babel/types": "^7.29.8",
+        "@types/mocha": "^10.0.10",
+        "@types/node": "24.x",
+        "@types/pngjs": "^6.0.5",
+        "@types/vscode": "^1.90.0",
+        "@vscode/test-cli": "^0.0.15",
+        "@vscode/test-electron": "^3.0.0",
+        "@vscode/vsce": "^4.0.0",
+        "eslint": "^10.5.0",
+        "gifenc": "^1.0.3",
+        "pngjs": "^7.0.0",
+        "ts-loader": "^9.6.2",
+        "typescript": "^6.0.3",
+        "typescript-eslint": "^8.61.1",
+        "webpack": "^5.107.2",
+        "webpack-cli": "^7.0.3"
+    },
+    "overrides": {
+        "diff": "^8.0.4",
+        "serialize-javascript": "^7.0.6"
     }
-  },
-  "scripts": {
-    "vscode:prepublish": "pnpm run package",
-    "compile": "webpack",
-    "watch": "webpack --watch",
-    "package": "webpack --mode production --devtool hidden-source-map",
-    "compile-tests": "tsc -p . --outDir out",
-    "watch-tests": "tsc -p . -w --outDir out",
-    "pretest": "pnpm run compile-tests && pnpm run compile && pnpm run lint",
-    "lint": "eslint src",
-    "test": "vscode-test",
-    "test:unit": "tsc -p . --outDir out && node --test \"out/test/*.spec.js\"",
-    "dev": "pnpm run compile && code --new-window --extensionDevelopmentPath=\"$PWD\" test-fixtures",
-    "vsix": "vsce package --no-dependencies"
-  },
-  "devDependencies": {
-    "@babel/parser": "^7.29.9",
-    "@babel/types": "^7.29.8",
-    "@types/mocha": "^10.0.10",
-    "@types/node": "24.x",
-    "@types/pngjs": "^6.0.5",
-    "@types/vscode": "^1.90.0",
-    "@vscode/test-cli": "^0.0.15",
-    "@vscode/test-electron": "^3.0.0",
-    "@vscode/vsce": "^4.0.0",
-    "eslint": "^10.5.0",
-    "gifenc": "^1.0.3",
-    "pngjs": "^7.0.0",
-    "ts-loader": "^9.6.2",
-    "typescript": "^6.0.3",
-    "typescript-eslint": "^8.61.1",
-    "webpack": "^5.107.2",
-    "webpack-cli": "^7.0.3"
-  },
-  "overrides": {
-    "diff": "^8.0.4",
-    "serialize-javascript": "^7.0.6"
-  }
 }
